@@ -6,12 +6,6 @@
       "use": "@vercel/next"
     }
   ],
-  "routes": [
-    {
-      "src": "/api/(.*)",
-      "dest": "/api/$1"
-    }
-  ],
   "env": {
     "JWT_SECRET": "@jwt-secret",
     "POSTGRES_URL": "@postgres-url"
