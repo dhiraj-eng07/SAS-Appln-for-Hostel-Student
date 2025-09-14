@@ -18,13 +18,8 @@
   },
   "devDependencies": {
     "@vercel/postgres": "^0.4.0"
-  },
-    "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start",
-    "vercel-build": "npm run build"
   }
 
 }
+
 
