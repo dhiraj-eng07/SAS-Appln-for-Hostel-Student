@@ -1,35 +1,23 @@
-import { Pool } from 'pg';
-
-// Create a connection pool
-const pool = new Pool({
-  connectionString: process.env.POSTGRES_URL,
-  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
-  max: 20, // maximum number of clients in the pool
-  idleTimeoutMillis: 30000, // how long a client is allowed to remain idle before being closed
-  connectionTimeoutMillis: 2000, // how long to wait for a connection
-});
-
-// Handle pool errors
-pool.on('error', (err) => {
-  console.error('Unexpected error on idle client', err);
-  process.exit(-1);
-});
+import { sql } from '@vercel/postgres';
 
 // Query function
-export const query = (text, params) => {
-  return pool.query(text, params);
+export const query = async (text, params) => {
+  try {
+    const result = await sql.query(text, params);
+    return result;
+  } catch (error) {
+    console.error('Database query error:', error);
+    throw error;
+  }
 };
 
 // Initialize database with test data
 export const initDb = async () => {
-  let client;
   try {
-    client = await pool.connect();
-    
     console.log('Initializing database...');
 
     // Create tables if they don't exist
-    await client.query(`
+    await sql`
       CREATE TABLE IF NOT EXISTS tenants (
         id SERIAL PRIMARY KEY,
         name VARCHAR(255) NOT NULL,
@@ -37,9 +25,9 @@ export const initDb = async () => {
         plan VARCHAR(50) DEFAULT 'free' CHECK (plan IN ('free', 'pro')),
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
-    `);
+    `;
 
-    await client.query(`
+    await sql`
       CREATE TABLE IF NOT EXISTS users (
         id SERIAL PRIMARY KEY,
         email VARCHAR(255) UNIQUE NOT NULL,
@@ -48,9 +36,9 @@ export const initDb = async () => {
         tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
-    `);
+    `;
 
-    await client.query(`
+    await sql`
       CREATE TABLE IF NOT EXISTS notes (
         id SERIAL PRIMARY KEY,
         title VARCHAR(255) NOT NULL,
@@ -60,20 +48,20 @@ export const initDb = async () => {
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
-    `);
+    `;
 
     // Create index for better performance
-    await client.query(`
+    await sql`
       CREATE INDEX IF NOT EXISTS idx_notes_tenant_id ON notes(tenant_id);
-    `);
+    `;
     
-    await client.query(`
+    await sql`
       CREATE INDEX IF NOT EXISTS idx_notes_user_id ON notes(user_id);
-    `);
+    `;
     
-    await client.query(`
+    await sql`
       CREATE INDEX IF NOT EXISTS idx_users_tenant_id ON users(tenant_id);
-    `);
+    `;
 
     // Insert test tenants if they don't exist
     const tenants = [
@@ -82,16 +70,14 @@ export const initDb = async () => {
     ];
 
     for (const tenant of tenants) {
-      const existingTenant = await client.query(
-        'SELECT id FROM tenants WHERE slug = $1', 
-        [tenant.slug]
-      );
+      const existingTenant = await sql`
+        SELECT id FROM tenants WHERE slug = ${tenant.slug}
+      `;
       
       if (existingTenant.rows.length === 0) {
-        await client.query(
-          'INSERT INTO tenants (name, slug) VALUES ($1, $2) RETURNING id',
-          [tenant.name, tenant.slug]
-        );
+        await sql`
+          INSERT INTO tenants (name, slug) VALUES (${tenant.name}, ${tenant.slug})
+        `;
         console.log(`Created tenant: ${tenant.name}`);
       }
     }
@@ -105,22 +91,20 @@ export const initDb = async () => {
     ];
 
     for (const user of testUsers) {
-      const existingUser = await client.query(
-        'SELECT id FROM users WHERE email = $1', 
-        [user.email]
-      );
+      const existingUser = await sql`
+        SELECT id FROM users WHERE email = ${user.email}
+      `;
       
       if (existingUser.rows.length === 0) {
-        const tenantResult = await client.query(
-          'SELECT id FROM tenants WHERE slug = $1', 
-          [user.tenantSlug]
-        );
+        const tenantResult = await sql`
+          SELECT id FROM tenants WHERE slug = ${user.tenantSlug}
+        `;
         
         if (tenantResult.rows.length > 0) {
-          await client.query(
-            'INSERT INTO users (email, password, role, tenant_id) VALUES ($1, $2, $3, $4) RETURNING id',
-            [user.email, user.password, user.role, tenantResult.rows[0].id]
-          );
+          await sql`
+            INSERT INTO users (email, password, role, tenant_id) 
+            VALUES (${user.email}, ${user.password}, ${user.role}, ${tenantResult.rows[0].id})
+          `;
           console.log(`Created user: ${user.email}`);
         } else {
           console.warn(`Tenant not found for user: ${user.email}`);
@@ -132,30 +116,17 @@ export const initDb = async () => {
     
   } catch (error) {
     console.error('Error initializing database:', error);
-    throw error; // Re-throw to handle in calling code
-  } finally {
-    if (client) {
-      client.release();
-    }
+    throw error;
   }
 };
 
 // Health check function
 export const checkDatabaseHealth = async () => {
   try {
-    const result = await query('SELECT NOW() as current_time');
+    const result = await sql`SELECT NOW() as current_time`;
     return { healthy: true, timestamp: result.rows[0].current_time };
   } catch (error) {
     console.error('Database health check failed:', error);
     return { healthy: false, error: error.message };
   }
 };
-
-// Close the pool (for graceful shutdown)
-export const closePool = async () => {
-  await pool.end();
-  console.log('Database pool closed');
-};
-
-// Export the pool for direct access if needed
-export default pool;
